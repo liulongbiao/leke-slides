@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Netty 最佳实践</title>
+<link rel="stylesheet" href="../../styles/font-awesome/css/font-awesome.min.css">
+<style type="text/css">
+.remark-inline-code {
+  color: red;
+}
+.fa {
+  font-size: 24px;
+  color: red;
+  margin-right: 10px;
+}
+</style>
+</head>
+<body>
+<textarea id="source">
+
+class: center, middle
+
+# Netty 最佳实践
+
+Faster == Better
+
+.right[
+[原文](http://25.media.tumblr.com/tumblr_me2eq0PnBx1rtu0cpo1_1280.jpg)
+]
+
+---
+
+# 大纲
+
+* 管道
+* 减少 GC 压力
+* 优雅地写出
+* Buffer 最佳实践
+* EventLoop
+
+---
+
+### 没有管道优化
+
+```java
+public class HttpHandler extends SimpleChannelInboundHandler<HttpRequest> {
+  @Override
+  public void channelRead(ChannelHandlerContext ctx, HttpRequest req) {
+    ChannelFuture future = ctx.writeAndFlush(createResponse(req)); `1`
+    if (!isKeepAlive(req)) {
+      future.addListener(ChannelFutureListener.CLOSE); `2`
+    }
+  }
+}
+```
+
+1. `write` 到 Channel 并 `flush` 出至 Socket
+2. 写操作完成后 `close` Socket
+
+---
+
+### 管道至安全的系统调用
+
+```java
+public class HttpPipeliningHandler extends SimpleChannelInboundHandler<HttpRequest> {
+  @Override
+  public void channelRead(ChannelHandlerContext ctx, HttpRequest req) {
+    ChannelFuture future = ctx.writeAnd(createResponse(req)); `1`
+    if (!isKeepAlive(req)) {
+      future.addListener(ChannelFutureListener.CLOSE); `2`
+    }
+  }
+  @Override
+  public void channelReadComplete(ChannelHandlerContext ctx) {
+    ctx.flush(); `3`
+  }
+}
+```
+
+1. `write` 到 Channel (**没有系统调用！**)，但还没有 flush
+2. 写操作完成后 `close` Socket
+3. `flush` 出至 Socket
+
+---
+
+### `write(msg)`, `flush()` 和 `writeAndFlush(msg)`
+
+* `write(msg)` ⇒ 传递穿过管道
+* `flush()` ⇒ 将前面写的消息收集写出
+* `writeAndFlush(msg)` ⇒ 对 `write(msg)` 和 `flush()` 合在一起的简写
+
+
+<i class="fa fa-thumbs-o-up"></i> 尽可能限制 `flush`，因为系统调用消耗很大
+
+<i class="fa fa-thumbs-o-up"></i> 但也要尽可能地限制 `write`，因为它需要遍历整个管道
+
+---
+
+### GC 压力 - Run Collector,run...
+
+![](http://25.media.tumblr.com/tumblr_me2eq0PnBx1rtu0cpo1_1280.jpg)
+
+---
+
+### GC 压力 - 通过使用 `VoidPromise` 来减少对象创建
+
+尽可能地使用 `VoidChannelPromise`
+
+<i class="fa fa-fire"></i>  `Channel.write(msg)`
+
+<i class="fa fa-thumbs-o-up"></i>  `Channel.write(msg, Channel.voidPromise())`
+
+<i class="fa fa-info-circle"></i>  ⇒ 仅在你不关心它的 `ChannelFuture`，并且没有任何 `ChannelOutboundHandler`
+需要给它添加 `ChannelFutureListener` 时使用！
+
+---
+
+### 写出可能太快！
+
+```java
+public class BlindlyWriteHandler extends ChannelInboundHandlerAdapter {
+  @Override
+  public void channelActive(ChannelHandlerContext ctx) throws Exception {
+    while(needsToWrite) { `1`
+        ctx.writeAndFlush(createMessage());
+    }
+  }
+}
+```
+
+1. 直到 `needsToWrite` 返回 `false` 才写出
+
+<i class="fa fa-fire"></i>  在写出太快且接收者很慢时有 `OutOfMemoryError` 风险！
+
+---
+
+### 针对慢接收者正确地写出
+
+```java
+public class GracefulWriteHandler extends ChannelInboundHandlerAdapter {
+  @Override
+  public void channelActive(ChannelHandlerContext ctx) {
+    writeIfPossible(ctx.channel());
+  }
+  @Override
+  public void channelWritabilityChanged(ChannelHandlerContext ctx) {
+    writeIfPossible(ctx.channel());
+  }
+
+  private void writeIfPossible(Channel channel) {
+    while(needsToWrite && `channel.isWritable()`) { `1`
+      channel.writeAndFlush(createMessage());
+    }
+  }
+}
+```
+
+1. 正确地使用 `Channel.isWritable()` 来避免 `OutOfMemoryError`
+
+---
+
+### 配置高低写出水位
+
+<i class="fa fa-thumbs-o-up"></i> 设置健全的 `WRITE_BUFFER_HIGH_WATER_MARK` 和 `WRITE_BUFFER_LOW_WATER_MARK`
+
+服务端：
+
+```java
+ServerBootstrap bootstrap = new ServerBootstrap();
+bootstrap.childOption(ChannelOption.WRITE_BUFFER_HIGH_WATER_MARK, 32 * 1024);
+bootstrap.childOption(ChannelOption.WRITE_BUFFER_LOW_WATER_MARK, 8 * 1024);
+```
+
+客户端：
+
+```java
+Bootstrap  bootstrap = new Bootstrap ();
+bootstrap.childOption(ChannelOption.WRITE_BUFFER_HIGH_WATER_MARK, 32 * 1024);
+bootstrap.childOption(ChannelOption.WRITE_BUFFER_LOW_WATER_MARK, 8 * 1024);
+```
+
+---
+
+### 传递自定义事件到 `ChannelPipeline`
+
+你的自定义事件：
+
+```java
+public enum CustomEvents {
+  MyCustomEvent
+}
+
+public class CustomEventHandler extends ChannelInboundHandlerAdapter {
+  @Override
+  public void userEventTriggered(ChannelHandlerContext ctx, Object evt) {
+    if (evt == MyCustomEvent) { // do something}
+  }
+}
+
+ChannelPipeline pipeline = channel.pipeline();
+pipeline.fireUserEventTriggered(MyCustomEvent);
+```
+
+<i class="fa fa-thumbs-o-up"></i> 非常适合握手通知等场景
+
+---
+
+### `ByteToMessageDecoder` vs. `ReplayingDecoder`
+
+`ReplayingDecoder` 使得解码器的书写变得简单，但它比 `ByteToMessageDecoder` 慢，因为..
+
+* 在方法中有更多的消耗
+* 需要处理 `ByteToMessageDecoder`
+
+<i class="fa fa-thumbs-o-up"></i> 经验法则 ⇒ 在事情不会变得复杂时，尽可能地使用 `ByteToMessageDecoder`
+
+---
+
+### 使用非池中 buffers 的问题
+
+<i class="fa fa-fire"></i> 请 **小心** 使用非池中的 buffers
+
+* 分配/释放很 **慢**
+* 腾出直接 buffers == **PITA**
+
+<i class="fa fa-thumbs-o-up"></i>  使用池中的 buffers
+
+---
+
+### 但配置 `PooledByteBufAllocator`
+
+![](http://normanmaurer.me/presentations/2014-facebook-eng-netty/images/condition_pooled.png)
+
+<i class="fa fa-fire"></i>  要根据是否有足够的区域条件地配置
+
+配置区域
+
+```bash
+java -Dio.netty.allocator.numDirectArenas=... -Dio.netty.allocator.numHeapArenas=...
+```
+
+<i class="fa fa-info-circle"></i>  在下一个版本中这不是一个问题。因为在 `PooledByteBufAllocator` 中有了
+[线程缓存](https://github.com/netty/netty/pull/2284) 。
+
+---
+
+### 使用 buffer 池来减少分配和释放时间！
+
+<i class="fa fa-thumbs-o-up"></i> 对直接和堆 buffer 的池化消耗
+
+![](http://normanmaurer.me/presentations/2014-facebook-eng-netty/images/pooled_buffers.png)
+
+---
+
+### **总是** 写出到直接 buffers
+
+<i class="fa fa-fire"></i>  OpenJDK 和 Oracle JDK 自己会拷贝其它东西至直接 buffer
+
+仅在需要操作 `ChannelOutboundHandler` 中的 `byte[]` 数组时使用堆 buffers！
+默认 `ByteBufAllocator.buffer(...)` 返回的是直接 `ByteBuf`
+
+> 将这一条作为经验法则
+
+---
+
+### ByteBuf 中的查找模式
+
+慢搜索 :(
+
+```java
+ByteBuf buf = ...;
+int index = -1;
+for (int i = buf.readerIndex(); index == -1 && i <  buf.writerIndex(); i++) {
+  if (buf.getByte(i) == '\n') {
+    index = i;
+  }
+}
+```
+
+快搜索 :)
+
+```java
+ByteBuf buf = ...;
+int index = buf.forEachByte(new ByteBufProcessor() {
+  @Override
+  public boolean process(byte value) {
+    return value != '\n';
+  }
+});
+```
+
+---
+
+### 继续 `ByteBufProcessor`
+
+`ByteBufProcessor` 更快，因为它...
+
+* 可以消除范围检查
+* 可以被创建和分享
+* 容易被 JIT 优化为行内执行
+
+<i class="fa fa-thumbs-o-up"></i> 在你想在某个 `ByteBuf` 中查找某些模式时总是使用它
+
+---
+
+### 其它 buffer 提示
+
+倾向于...
+
+* `alloc()` 而不是 Unpooled
+* `slice()`, `duplicate()` 而不是 `copy()`
+* 批量操作而不是循环
+
+---
+
+### 带负载的消息？是的，请...
+
+`ByteBuf` 负载 ⇒ extend `DefaultByteBufHolder`
+
+* 免费的引用计数
+* 自动释放资源
+
+![](http://normanmaurer.me/presentations/2014-facebook-eng-netty/images/thumb_up_2.jpg)
+
+---
+
+### 文件转发？
+
+<i class="fa fa-thumbs-o-up"></i> 对原始文件内容的高效转发使用零内存拷贝
+
+```java
+Channel channel = ...;
+FileChannel fc = ...;
+channel.writeAndFlush(new DefaultFileRegion(fc, 0, fileLength));
+```
+
+<i class="fa fa-fire"></i> 它只在你不需要运行时修改数据的情况下使用。
+如果需要修改，请使用 `ChunkedWriteHandler` 和 `NioChunkedFile`
+
+---
+
+### 永远不要阻塞 EventLoop !
+
+* <i class="fa fa-fire"></i> `Thread.sleep()`
+* <i class="fa fa-fire"></i> `CountDownLatch.await()` 或任何其他来自 `java.util.concurrent` 的阻塞操作
+* <i class="fa fa-fire"></i> 长时间的计算密集型操作
+* <i class="fa fa-fire"></i> 可能需要一定时间的阻塞操作(如， DB 查询)
+
+![](http://normanmaurer.me/presentations/2014-facebook-eng-netty/images/site_blocked.jpg)
+
+---
+
+### EventLoop 扩展自 ScheduledExecutorService，因此使用它!
+
+<i class="fa fa-thumbs-o-up"></i> 通过 `EventLoop` 来调度和执行任务，
+它能减少所需的线程并且也使得它是线程安全的。
+
+![](http://normanmaurer.me/presentations/2014-facebook-eng-netty/images/schedule.jpg)
+
+---
+
+### 可以话重用 EventLoopGroup
+
+```java
+Bootstrap bootstrap = new Bootstrap().group(new NioEventLoopGroup());
+Bootstrap bootstrap2 = new Bootstrap().group(new NioEventLoopGroup());
+```
+
+在不同的 Bootstraps 间共享 EventLoopGroup 
+
+```java
+EventLoopGroup group = new NioEventLoopGroup();
+Bootstrap bootstrap = new Bootstrap().group(group);
+Bootstrap bootstrap2 = new Bootstrap().group(group);
+```
+
+<i class="fa fa-thumbs-o-up"></i> **共享** 同一个 `EventLoopGroup` 使得资源的使用(如线程使用)最小化。
+
+---
+
+### 类似代理的应用中的上下文切换问题
+
+```java
+public class ProxyHandler extends ChannelInboundHandlerAdapter {
+  @Override
+  public void channelActive(ChannelHandlerContext ctx) { `1`
+    final Channel inboundChannel = ctx.channel();
+    Bootstrap b = new Bootstrap();
+    b.group(new NioEventLooopGroup()); `2`
+    ...
+    ChannelFuture f = b.connect(remoteHost, remotePort);
+    ...
+  }
+}
+```
+
+1. 在链接被接收时调用一次
+2. 使用一个新的 `EventLoopGroup` 实例来处理到远端的链接
+
+<i class="fa fa-fire"></i> 不要这么做，它会捆绑比需要的更多的资源并且引入额外的上下文切换消耗。
+
+---
+
+### 类似代理的应用中的将上下文切换降到最小
+
+```java
+public class ProxyHandler extends ChannelInboundHandlerAdapter {
+  @Override
+  public void channelActive(ChannelHandlerContext ctx) { `1`
+    final Channel inboundChannel = ctx.channel();
+    Bootstrap b = new Bootstrap();
+    b.group(inboundChannel.eventLoop()); `2`
+    ...
+    ChannelFuture f = b.connect(remoteHost, remotePort);
+    ...
+  }
+}
+```
+
+1. 在链接被接收时调用一次
+2. 在两个 Channels 间共享相同的 `EventLoop`。这意味着两个连接的 Channels 的所有 IO 都由同一个线程处理。
+
+<i class="fa fa-thumbs-o-up"></i> 总是这这些应用中 **共享** EventLoop。
+
+---
+
+### 当在 EventLoop 外调用时整合操作
+
+不推荐！
+
+```java
+channel.write(msg1);
+channel.writeAndFlush(msg3);
+```
+
+整合操作
+
+```java
+channel.eventLoop().execute(new Runnable() {
+  @Override
+  public void run() {
+    channel.write(msg1);
+    channel.writeAndFlush(msg3);
+  }
+});
+```
+
+<i class="fa fa-thumbs-o-up"></i> 在 EventLoop 外操作 `Channel` 时总是尽可能 **整合** 操作，
+以减少唤醒和对象创建消耗！
+
+---
+
+### 来自 ChannelHandler 内部的操作
+
+```java
+public class YourHandler extends ChannelInboundHandlerAdapter {
+  @Override
+  public void channelActive(ChannelHandlerContext ctx) {
+    // BAD (most of the times)
+    ctx.channel().writeAndFlush(msg); `1`
+
+    // GOOD
+    ctx.writeAndFlush(msg); `2`
+   }
+}
+```
+
+1. `Channel.*` 方法 ⇒ 操作总会在 `ChannelPipeline` 的尾部开始
+2. `ChannelHandlerContext.*` 方法 ⇒ 操作会从该 `ChannelHandler` 开始穿过 `ChannelPipeline`
+
+<i class="fa fa-thumbs-o-up"></i> 尽可能使用最短 **路径** 以获取最高的性能
+
+---
+
+### 若无状态时共享 ChannelHandler
+
+```java
+@ChannelHandler.Shareable `1`
+public class StatelessHandler extends ChannelInboundHandlerAdapter {
+  @Override
+  public void channelActive(ChannelHandlerContext ctx) {
+    logger.debug("Now client from " + ctx.channel().remoteAddress().toString());
+   }
+}
+
+public class MyInitializer extends ChannelInitializer<Channel> {
+  private static final ChannelHandler INSTANCE = new StatelessHandler();
+  @Override
+  public void initChannel(Channel ch) {
+    ch.pipeline().addLast(INSTANCE);
+  }
+}
+```
+
+1. 使用 `@ChannelHandler.Shareable` 注解来标注 `ChannelHandler` 为无状态的，
+并且在 Channels 间共享相同的实例以减少 GC。
+
+---
+
+### 一旦不再需要就移除 ChannelHandler
+
+```java
+public class OneTimeHandler extends ChannelInboundHandlerAdapter {
+  @Override
+  public void channelActive(ChannelHandlerContext ctx) {
+    doOneTimeAction();
+    ctx.channel().pipeline().remove(this); `1`
+   }
+}
+```
+
+1. 一旦不再需要就移除 `ChannelHandler`
+
+<i class="fa fa-thumbs-o-up"></i> 这能保持 `ChannelPipeline` 尽可能短，
+因此尽可能地**消除**遍历管道的消耗。
+
+---
+
+### 在 MessageToByteEncoder 中使用合适的 buffer 类型
+
+```java
+public class EncodeActsOnByteArray extends MessageToByteEncoder<YourMessage> {
+  public EncodeActsOnByteArray() { super(false); } `1`
+  @Override
+  public encode(ChannelHandlerContext ctx, YourMessage msg, ByteBuf out) {
+    byte[] array = out.array(); `2`
+    int offset = out.arrayOffset() + out.writerIndex();
+    out.writeIndex(out.writerIndex() + encode(msg, array, offset)); `3`
+  }
+  private int encode(YourMessage msg, byte[] array, int offset, int len) { ... }
+}
+```
+
+1. 确保传递给 `encode(...)` 方法所使用的是 **堆 buffer**。这种情况下你可以直接访问背后的数组。
+2. 访问 **背后的数组** 并且计算偏移量
+3. 更新 `writerIndex` 以反映写出的字节
+
+<i class="fa fa-thumbs-o-up"></i> 这能节省额外的字节拷贝
+
+---
+
+### 自动读取还是不自动读取
+
+默认情况下 Netty 会在有东西准备好后一直从 `Channel` 中读取数据。
+
+需要更细粒度的控制？
+
+```java
+channel.config().setAutoRead(false); `1`
+channel.read(); `2`
+channel.config().setAutoRead(true); `3`
+```
+
+1. 禁用自动读取 == 不再从该 `Channel` 自动读取数据
+2. 告诉该 `Channel` 在新数据准备好后执行一次读取
+3. 再次启用自动读取 == Netty 将再次自动读取
+
+<i class="fa fa-thumbs-o-up"></i> 这在编写类似代理的应用时很有用。
+
+---
+
+### SSL - 如果性能攸关时不要使用 JDK 的 SSLEngine
+
+<i class="fa fa-fire"></i> JDK 的 `SSLEngine` 非常慢且产生了 **太多的 GC** :(
+
+<i class="fa fa-thumbs-o-up"></i> 使用 Twitters 的基于 OpenSSL 的 `SSLEngine`。
+更多如何编译的细节查看 [Finagle native module](https://github.com/twitter/finagle/tree/master/finagle-native)
+
+```java
+import com.twitter.finagle.ssl.Ssl;
+...
+
+SSLEngine engine = Ssl.server("/path/to/cert.pem", "/path/to/key.pem", "/path/to/cachain.pem", null, null).self();
+pipeline.addLast("ssl", new SslHandler(engine));
+```
+
+<i class="fa fa-info-circle"></i> Netty 将很快自己附带一个基于 OpenSSL 的 `SslHandler`。
+
+---
+
+### 杂项
+
+<i class="fa fa-info-circle"></i> 你永远不知道 `ChannelFuture` 什么时候会被通知。
+
+BAD
+
+```java
+public class OuterClass {
+  private final HeavyObject instance = ....;
+  public void write() { channel.writeAndFlush(msg).addListener(
+      new ChannelFutureListener() { ...}); }
+}
+```
+
+GOOD
+
+```java
+public class OuterClass {
+  private final HeavyObject instance = ....;
+  public void write() { channel.writeAndFlush(msg).addListener(new ListenerImpl()); }
+
+  private static final class ListenerImpl implements ChannelFutureListener { ... }
+}
+```
+
+---
+
+### 原生传输以获取更少 GC 和更低延迟...
+
+* 和 NIO 少的 GC
+* 更少的同步
+* Edge-Triggered!
+* 支持 `TCP_CORK`
+
+<i class="fa fa-fire"></i> 仅在 Linux 上可运行，因为 epoll 支持 atm。以后可能会改变。
+
+---
+
+### 切换到原生传输很容易
+
+使用 NIO 传输
+
+```java
+Bootstrap bootstrap = new Bootstrap().group(new NioEventLoopGroup());
+bootstrap.channel(NioSocketChannel.class);
+```
+
+使用原生传输
+
+```java
+Bootstrap bootstrap = new Bootstrap().group(new EpollEventLoopGroup());
+bootstrap.channel(EpollSocketChannel.class);
+```
+
+---
+
+class: center, middle
+
+# 谢谢！
+
+</textarea>
+<script src="../../scripts/remark-latest.min.js"></script>
+<script>
+var slideshow = remark.create({
+  highlightLines: true,
+  highlightSpans: true
+});
+</script>
+</body>
+</html>
