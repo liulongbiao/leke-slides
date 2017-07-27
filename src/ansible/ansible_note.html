@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Ansible 学习笔记</title>
+<link rel="stylesheet" href="../../styles/font-awesome/css/font-awesome.min.css">
+<link rel="stylesheet" href="../../styles/slide.css">
+</head>
+<body>
+<textarea id="source">
+name: inverse
+layout: true
+class: theme-inverse
+
+---
+
+class: center, middle
+
+# Ansible 学习笔记
+
+Ansible 自动化运维
+
+---
+
+# 大纲
+
+* [Ansible 架构及特点](#arch)
+* [Ansible 安装与配置](#start)
+* Ansible 组件介绍
+* Playbook 详解
+* Ansible 最佳实践
+* 扩展 Ansible
+* 用 ansible_vault 保护敏感数据
+* Ansible 与云计算
+* 部署 Zabbix 组件
+* 部署 HAProxy 与 LAMP 架构
+* 大数据环境的应用实战
+* Ansible 管理 Windows 系统
+* 网络自动化管理的应用实战
+* Ansible API
+
+---
+
+name: arch
+
+## Ansible 架构及特点
+
+.content[
+* [Ansible 软件及公司](#arch-introduction)
+* [Ansible 架构模式](#arch-architecture)
+* [Ansible 特性](#arch-feature)
+* [Ansible 与 DevOps](#arch-devops)
+]
+
+---
+
+name: arch-introduction
+
+.sidebar[
+### Ansible 架构及特点
+
+* Ansible 应用领域
+]
+
+.content[
+Ansible 的编排引擎可以出色地完成配置管理、流程控制、资源部署等多方面的工作。
+
+与其它 IT 自动化产品比较， Ansible 为你提供了一种不需要安装客户端软件、管理简便、功能强大的
+基础架构配置、维护工具。
+]
+
+---
+
+.sidebar[
+### Ansible 架构及特点
+
+* Ansible 应用领域
+* Ansible 设计理念
+]
+
+.content[
+Ansible 基于 Python 语言实现，由 Paramiko 和 PyYAML 两个核心模块构建。其设计理念有：
+
+* 安装部署过程特别简单，学习曲线很平坦
+* 管理主机便捷，支持多台主机并行管理
+* 避免在被管主机上安装客户代理、打开额外端口，采用无代理方式，只是利用现有的 SSH 后台进程
+* 用于描述架构的语言无论对机器还是对人都是友好的
+* 关注安全，很容易对执行的内容进行审计、评估、重写
+* 能够立即管理远程被管主机，不需要预先安装任何软件
+* 不仅仅支持 Python ,可运行使用任何动态语言开发模块
+* 非 root 帐户也可以使用
+* 成为最简单、易用的 IT 自动化系统
+]
+
+---
+
+.sidebar[
+### Ansible 架构及特点
+
+* Ansible 应用领域
+* Ansible 设计理念
+* Ansible 公司服务
+]
+
+.content[
+* Ansible 健康检查服务
+* 协助重大迁移服务
+* 推进 IT 自动化项目
+* 客户咨询服务
+* Ansible 培训服务
+]
+
+---
+
+name: arch-architecture
+
+.sidebar[
+### Ansible 架构模式
+
+* Ansible 管理方式
+]
+
+.content[
+Ansible 是一个模型驱动的配置管理器，支持多节点发布、远程任务执行。
+默认使用 SSH 进行远程连接。
+无需在被管节点上安装附加软件，可使用各种编程语言进行扩展。
+
+Ansible 管理系统由控制主机和一组被管节点组成。
+控制主机直接通过 SSH 控制被管节点，被管节点通过 Ansible 的资源清单(`inventory`)来进行分组管理。
+
+Ansible 的配置管理脚本称为 playbook ,在 playbook 中描述了包含被管节点的 hosts 和
+对这些 hosts 按照顺序执行的任务列表(task)。
+]
+
+---
+
+.sidebar[
+### Ansible 架构模式
+
+* Ansible 管理方式
+* Ansible 系统架构
+]
+
+.content[
+![](./images/ansible_arch.png)
+]
+
+---
+
+.sidebar[
+### Ansible 架构模式
+
+* Ansible 管理方式
+* Ansible 系统架构
+* Ansible 任务执行模式
+]
+
+.content[
+* ad-hoc - 批量执行单个模块的任务
+* playbook - 组合多个 task 的集合来完成一类任务
+]
+
+---
+
+name: arch-feature
+
+.sidebar[
+### Ansible 架构模式
+
+* Ansible 功能特性
+]
+
+.content[
+* 应用代码自动化部署
+* 系统管理配置自动化
+* 支持持续交付自动化
+* 支持云计算、大数据平台环境
+* 轻量级，无需在客户端安装代理，更新时只需在控制机上进行一次更新即可
+* 批量任务执行可以写成脚本，不用分发到远程就可以执行
+* 使用 Python 编写，维护更简单
+* 支持非 `root` 用户管理操作，支持 `sudo`
+]
+
+---
+
+.sidebar[
+### Ansible 架构模式
+
+* Ansible 功能特性
+* Ansible 特点
+]
+
+.content[
+1. 语法简单易读
+2. 无需在被管节点安装客户端软件
+    * 提高网络安全
+    * 可以使用非 root 用户访问(支持 sudo)
+    * 限制传输潜在敏感数据
+    * 凭证隔离(Credential Segragation)
+    * 去中心化
+    * 没有 『管理的管理程序』的问题
+    * 管理服务器的可扩展性
+    * 资源的利用
+    * 防火墙的友好性和确定性
+3. 基于推送的方式
+4. 方便管理小规模场景
+5. 内置大量模块
+6. 非常轻量级的抽象层
+]
+
+---
+
+class: center, middle
+
+# 谢谢！
+
+</textarea>
+<script src="../../scripts/remark-latest.min.js"></script>
+<script>
+var slideshow = remark.create({
+  highlightLines: true,
+  highlightSpans: true
+});
+</script>
+</body>
+</html>

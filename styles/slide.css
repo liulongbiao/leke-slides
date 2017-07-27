@@ -1,3 +1,7 @@
+.remark-slide-content a {
+  text-decoration: none;
+  color: inherit;
+}
 .remark-inline-code {
   color: red;
 }
@@ -5,4 +9,46 @@
   font-size: 24px;
   color: red;
   margin-right: 10px;
+}
+.sidebar {
+  float: left;
+  width: 20%;
+  padding: 1em;
+  color: #777;
+}
+.sidebar h3 {
+  font-weight: bold;
+  font-size: 1.17em;
+}
+.sidebar ul {
+  list-style:none;
+  padding: 0;
+  margin: 0;
+}
+.sidebar li {
+  padding-left: 1em;
+}
+.sidebar li:last-child{
+  font-weight: bold;
+  color: #000;
+}
+.content {
+  overflow: hidden;
+  margin-top: 2em;
+}
+.content img {
+  max-width: 100%;
+}
+
+.theme-inverse {
+  background: #272822;
+  color: #777872;
+  text-shadow: 0 0 20px #333;
+}
+.theme-inverse h1, .theme-inverse h2 {
+  color: #f3f3f3;
+  line-height: 0.8em;
+}
+.theme-inverse .sidebar li:last-child{
+  color: #DDD;
 }
