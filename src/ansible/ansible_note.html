@@ -210,6 +210,128 @@ name: arch-feature
 
 ---
 
+name: start
+
+.sidebar[
+### Ansible 安装与配置
+
+* 安装 Ansible
+]
+
+.content[
+详见[官方安装说明](http://docs.ansible.com/ansible/latest/intro_installation.html)
+]
+
+---
+
+.sidebar[
+### Ansible 安装与配置
+
+* 安装 Ansible
+* 配置运行环境
+]
+
+.content[
+Ansible 配置文件以 ini 格式存储配置数据，在 Ansible 中几乎所有配置项都可以通过
+Ansible 的 playbook 或环境变量来重新赋值。配置文件查找顺序：
+
+* `ANSIBLE_CONFIG` 环境变量
+* `./ansible.cfg` 当前目录下的 ansible.cfg 配置文件
+* `~/.ansible.cfg` 用户目录下的 .ansible.cfg 配置文件
+* `/etc/ansible/ansible.cfg` 全局 ansible.cfg 配置文件
+]
+
+---
+
+.sidebar[
+#### 配置 SSH 无密码访问
+]
+
+.content[
+(1) 在控制主机上创建密钥
+
+```bash
+ssh-kengen -t rsa
+```
+
+(2) 使用 `ssh-copy-id` 下发密钥
+
+```bash
+ssh-copy-id -i /home/yoyobill/.ssh/id_rsa.pub leke@192.168.70.186
+```
+
+(3) 验证无密码访问是否成功
+
+```bash
+ssh leke@192.168.70.186
+```
+]
+
+---
+
+.sidebar[
+### Ansible 安装与配置
+
+* 安装 Ansible
+* 配置运行环境
+* Ansible 小试身手
+]
+
+.content[
+查看版本：
+
+```bash
+ansible --version
+```
+
+联通性测试：
+
+(1) 写入 `/etc/ansible/hosts`
+
+```ini
+[server]
+192.168.70.186
+```
+(2) 测试联通性
+
+```bash
+ansible 192.168.70.186 -m ping
+```
+]
+
+---
+
+.sidebar[
+### Ansible 安装与配置
+
+* 安装 Ansible
+* 配置运行环境
+* Ansible 小试身手
+* 获取帮助信息
+]
+
+.content[
+通过 -h 参数查看帮助：
+
+```bash
+ansible -h
+```
+
+通过 `ansible-doc` 查看文档帮助：
+
+```bash
+ansible-doc -h
+```
+
+通过 `-vvv` 或 `-vvvv` 查看详细输出结果：
+
+```bash
+ansible server -i inventory.cfg -m ping -vvv
+```
+]
+
+---
+
 class: center, middle
 
 # 谢谢！
