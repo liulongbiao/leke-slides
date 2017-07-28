@@ -26,7 +26,7 @@ Ansible 自动化运维
 
 * [Ansible 架构及特点](#arch)
 * [Ansible 安装与配置](#start)
-* Ansible 组件介绍
+* [Ansible 组件介绍](#component)
 * Playbook 详解
 * Ansible 最佳实践
 * 扩展 Ansible
@@ -330,6 +330,333 @@ ansible server -i inventory.cfg -m ping -vvv
 ```
 ]
 
+---
+
+name: component
+
+.sidebar[
+### Ansible 组件
+]
+
+.content[
+* Ansible Inventory
+* Ansible ad-hoc 命令
+* Ansible playbook
+* Ansible facts
+* Ansible role
+* Ansible Galaxy
+]
+
+---
+
+.sidebar[
+### Ansible 组件
+
+* Inventory
+]
+
+.content[
+大规模配置管理工作中需要管理不同业务的不同机器，这些机器的信息都存放在 Ansible 的 Inventory 组件里。
+
+默认的 Inventory 是 ini 格式的 `/etc/ansible/hosts` 静态文件，
+也可以通过 `ANSIBLE_HOSTS` 环境变量或在运行 `ansible`/`ansible-playbook` 时通过 `-i` 参数临时指定。
+]
+
+---
+
+.sidebar[
+### Ansible 组件
+
+* Inventory
+]
+
+.content[
+### 单个 Inventory 文件
+
+```ini
+192.168.70.186 ansible_ssh_user=leke
+[sheet]
+192.168.70.186
+[sheet:vars]
+ansible_ssh_pass=cnstrong
+[ansible:children]
+sheet
+```
+]
+
+---
+
+.sidebar[
+### Ansible 组件
+
+* Inventory
+]
+
+.content[
+### 多个 Inventory 文件
+
+修改 `ansible.cfg` 中 `hosts` 文件的定义，或者使用 `ANSIBLE_HOSTS` 环境变量定义，将其指向一个目录。
+
+给定 inventory 目录：
+
+```
+inventory/
+|-- docker
+|-- hosts
+```
+
+修改 `ansible.cfg` 中的 `inventory` 值：
+
+```ini
+inventory=/home/yoyobill/inventory/
+```
+
+使用：
+
+```bash
+ansible docker --list-hosts
+```
+
+]
+
+---
+
+.sidebar[
+### Ansible 组件
+
+* Inventory
+]
+
+.content[
+### 动态 Inventory
+
+可以将 `ansible.cfg` 中的 `inventory` 值改成一个执行脚本，这个脚本可以支持任何编程语言，
+但脚本的使用参数和执行结果有一定的规范。
+
+这个脚本需要支持两个参数：
+
+* `--list` 或 `-l` ，这个参数运行后会显示所有的主机及主机组的信息(JSON 格式)
+* `--host` 或 `-H` ，这个参数后面需指定一个 host ，运行结果
+会返回这台主机的所有信息(包括认证信息、主机变量等， JSON 格式)
+
+]
+
+---
+
+.sidebar[
+### Ansible 组件
+
+* Inventory
+]
+
+.content[
+#### inventory 内置参数
+]
+
+---
+
+.sidebar[
+### Ansible 组件
+
+* Inventory
+* ad-hoc 命令
+]
+
+.content[
+#### 执行命令
+
+Ansible 自带很多模块，可以直接使用这些模块。
+
+Ansible 命令都是并发执行的，可以针对目标主机执行任何命令
+
+默认并发数由 `ansible.cfg` 中的 `forks` 值控制，也可以通过 `-f` 指定并发数：
+
+```bash
+ansible docker -m shell -a 'uname -r' -f 5 -o
+```
+]
+
+---
+
+.sidebar[
+### Ansible 组件
+
+* Inventory
+* ad-hoc 命令
+]
+
+.content[
+#### 执行命令
+
+可以使用 Ansible 的异步执行功能来执行， `-P 0` 的情况下会直接返回 `job_id` ：
+
+```bash
+ansible docker -B 120 -P 0 -m shell -a 'sleep 10;hostname' -f 5 -o
+```
+
+可以通过 `async_status` 模块根据 `job_id` 来查看异步任务的状态和结果：
+
+```bash
+ansible 192.168.70.186 -m async_status -a 'jid=288872560652.1096'
+```
+
+当 `-P` 参数大于 0 时，Ansible 会自动根据 `job_id` 去轮询查询结果：
+
+```bash
+ansible docker -B 120 -P 1 -m shell -a 'sleep 5;hostname' -f 5 -o
+```
+]
+
+---
+
+.sidebar[
+### Ansible 组件
+
+* Inventory
+* ad-hoc 命令
+]
+
+.content[
+#### 复制文件
+
+可以使用 `copy` 模块批量下发文件，文件的变化通过 MD5 值来判断：
+
+```bash
+ansible docker -m copy -a 'src=hosts.py dest=/root/hosts.py owner=root group=root mode=644 backup=yes'
+```
+]
+
+---
+
+.sidebar[
+### Ansible 组件
+
+* Inventory
+* ad-hoc 命令
+]
+
+.content[
+#### 包和服务管理
+
+```bash
+ansible docker -m yum -a 'name=httpd state=latest' -f 5 -o
+```
+]
+
+---
+
+.sidebar[
+### Ansible 组件
+
+* Inventory
+* ad-hoc 命令
+]
+
+.content[
+#### 用户管理
+
+先通过 openssl 生成一个密码，因为 ansible user 的 `password` 参数需要接收加密后的值：
+
+```bash
+echo Password@1 | openssl passwd -1 -stdin
+```
+
+然后使用 user 模块批量创建用户
+
+```bash
+ansible docker -m user -a 'name=exschool password="$1$GPMkU7YL$.qu3Nsdfwee.TPfsgasdfg"' -f 5 -o
+```
+]
+
+---
+
+.sidebar[
+### Ansible 组件
+
+* Inventory
+* ad-hoc 命令
+* Playbook
+]
+
+.content[
+Playbook 是 Ansible 进行配置管理的组件
+
+ad-hoc 命令无法支撑复杂环境的配置管理工作
+]
+
+---
+
+.sidebar[
+### Ansible 组件
+
+* Inventory
+* ad-hoc 命令
+* Playbook
+* facts
+]
+
+.content[
+facts 组件是 Ansible 用于采集被管机器设备信息的一个功能
+
+可以使用 `setup` 模块查看机器的所有 facts 信息，可以使用 `filter` 来查看指定信息
+
+```bash
+ansible 192.168.70.186 -m setup
+
+ansible 192.168.70.186 -m setup -a 'filter=ansible_all_ipv4_address'
+```
+]
+
+---
+
+.sidebar[
+### Ansible 组件
+
+* Inventory
+* ad-hoc 命令
+* Playbook
+* facts
+* role
+]
+
+.content[
+role 是对日常使用的 playbook 的目录结构的一些规范，便于维护大量不同业务的 playbooks.
+
+```
+|-- roles
+|  |-- nginx
+|     |-- files
+|     |  |-- index.html
+|     |-- handlers
+|     |  |-- main.yaml
+|     |-- tasks
+|     |  |-- main.yaml
+|     |-- templates
+|     |  |-- nginx.conf.j2
+|     |-- vars
+|        |-- main.yaml
+|-- site.yaml
+```
+]
+
+---
+
+.sidebar[
+### Ansible 组件
+
+* Inventory
+* ad-hoc 命令
+* Playbook
+* facts
+* role
+* Galaxy
+]
+
+.content[
+Ansible Galaxy 是 Ansible 官方一个分享 role 的功能平台
+
+https://galaxy.ansible.com/list#/roles
+]
 ---
 
 class: center, middle
