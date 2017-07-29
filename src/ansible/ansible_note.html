@@ -27,7 +27,7 @@ Ansible 自动化运维
 * [Ansible 架构及特点](#arch)
 * [Ansible 安装与配置](#start)
 * [Ansible 组件介绍](#component)
-* Playbook 详解
+* [Playbook 详解](#playbook)
 * Ansible 最佳实践
 * 扩展 Ansible
 * 用 ansible_vault 保护敏感数据
@@ -656,6 +656,761 @@ role 是对日常使用的 playbook 的目录结构的一些规范，便于维�
 Ansible Galaxy 是 Ansible 官方一个分享 role 的功能平台
 
 https://galaxy.ansible.com/list#/roles
+]
+
+---
+
+name: playbook
+
+.sidebar[
+### Playbook
+
+* 基本语法
+]
+
+.content[
+Ansible 的 playbook 文件格式为 YAML 语法，所以需要对 YAML 语法有一定的了解
+
+Ansible 的 inventory 文件为 ini 文件格式。
+
+Ansible 的模板语法为 Python 的 Jinja2 模板引擎。
+
+可以使用 `--syntax-check` 参数进行语法检测：
+
+```bash
+ansible-playbook nginx.yaml --syntax-check
+ansible-playbook nginx.yaml --list-task
+ansible-playbook nginx.yaml --list-hosts
+```
+
+确认信息都正确后，可以直接运行：
+
+```bash
+ansible-playbook -i hosts nginx.yaml -f 3
+```
+]
+
+---
+
+name: playbook
+
+.sidebar[
+### Playbook
+
+* 基本语法
+]
+
+.content[
+后续如果需要更改 Nginx 配置，只需修改 nginx.conf.j2 模板即可
+
+在运行 playbook 时可以指定从哪个 task 开始运行：
+
+```bash
+ansible-playbook -i hosts nginx.yaml -f 3 --start-at-task='Copy Nginx.conf'
+```
+
+通过 `--step` 参数也可以交互式地执行 task 
+]
+
+---
+
+.sidebar[
+### Playbook
+
+* 基本语法
+* 变量与引用
+]
+
+.content[
+#### 通过 inventory 文件定义主机及主机组变量
+
+inventory 文件
+
+```ini
+192.168.70.186 key=186
+[docker]
+192.168.70.186
+[docker:vars]
+ansible_ssh_user=leke
+```
+
+playbook 文件：
+
+```yaml
+---
+  - hosts: all
+    gather_facts: False
+    tasks:
+      - name: display host variable from hostfile
+        debug: msg="The {{ inventory_hostname }} Value is {{ key }}"
+```
+
+运行：
+
+```bash
+ansible-playbook variable.yaml
+```
+]
+
+---
+
+.sidebar[
+### Playbook
+
+* 基本语法
+* 变量与引用
+]
+
+.content[
+#### 通过 /etc/ansible/ 下的文件定义主机及主机组变量
+
+默认配置文件是在 `/etc/ansible/` 目录下，我们可以在该目录下创建 `host_vars` 和 `group_vars` 目录来给主机和主机组定义变量。
+也可以在当前目录下创建这两个目录进行定义。
+
+```
+|-- ansible.cfg
+|-- group_vars
+|  |-- nginx
+|-- hosts
+|-- host_vars
+   |-- 192.168.70.186
+   |-- 192.168.70.187
+```
+
+]
+
+---
+
+.sidebar[
+### Playbook
+
+* 基本语法
+* 变量与引用
+]
+
+.content[
+#### 通过 ansible-playbook 命令行传入
+
+可以通过命令行参数来定义变量，但默认传进去的变量都是全局变量：
+
+```bash
+ansible-playbook variable.yaml -e "key=KEY"
+```
+
+当然也支持同时传多个变量。
+还支持指定文件的方式传入变量，内容格式支持 YAML 和 JSON 两种：
+
+```bash
+ansible-playbook variable.yaml -e "@vars.json"
+```
+
+]
+
+---
+
+.sidebar[
+### Playbook
+
+* 基本语法
+* 变量与引用
+]
+
+.content[
+#### 在 playbook 文件中使用 vars
+
+可以在 playbook 文件中通过 `vars` 字段来定义变量
+
+```yaml
+---
+  - hosts: all
+    gather_facts: False
+    vars:
+      key: Ansible
+    tasks:
+      - name: display Host variable from vars field
+        debug: msg="The {{ inventory_hostname }} Value is {{ key }}"
+```
+
+]
+
+---
+
+.sidebar[
+### Playbook
+
+* 基本语法
+* 变量与引用
+]
+
+.content[
+#### 在 playbook 文件中使用 vars_files
+
+还可以在 playbook 文件中通过 `vars_files` 字段引用变量
+
+```yaml
+---
+  - hosts: all
+    gather_facts: False
+    vars_files:
+      - vars.yaml
+    tasks:
+      - name: display Host variable from vars_files field
+        debug: msg="The {{ inventory_hostname }} Value is {{ key }}"
+```
+
+]
+
+---
+
+.sidebar[
+### Playbook
+
+* 基本语法
+* 变量与引用
+]
+
+.content[
+#### 使用 register 内的变量
+
+Ansible playbook 中的 task 之间可以通过 register 的方式相互传递数据：
+
+```yaml
+---
+  - hosts: all
+    gather_facts: False
+    tasks:
+      - name: register variable
+        shell: hostname
+        register: info
+      - name: display variable
+        debug: msg="The variable is {{ info }}"
+```
+]
+
+---
+
+.sidebar[
+### Playbook
+
+* 基本语法
+* 变量与引用
+]
+
+.content[
+#### 使用 vars_prompt 传入
+
+可以在运行 playbook 时交互式的给定义好的参数传入变量值，只需要在 playbook 中定义 `vars_prompt` 的变量名和交互式提示内容即可：
+
+```yaml
+---
+  - hosts: all
+    gather_facts: False
+    vars_prompt:
+      - name: "foo"
+        prompt: "Please input foo value"
+        private: no
+      - name: "bar"
+        prompt: "Please input bar value"
+        default: 'good'
+        private: yes
+    tasks:
+      - name: display foo value
+        debug: msg="foo is {{ foo }}"
+      - name: display bar value
+        debug: msg="bar is {{ bar }}"
+```
+
+]
+
+---
+
+.sidebar[
+### Playbook
+
+* 基本语法
+* 变量与引用
+]
+
+.content[
+#### 变量的引用
+
+变量的引用方式相对较少，都是根据变量的值的类型相对应的 `{{ key }}`、`{{ key['field'] }}`、、`{{ key[0]['field'] }}` 等固定格式。
+]
+
+---
+
+.sidebar[
+### Playbook
+
+* 基本语法
+* 变量与引用
+* 循环
+]
+
+.content[
+#### 标准 loops
+
+可以使用 loops 的方式去编写 playbook ，减少编写 tasks 的次数
+
+```yaml
+---
+  - hosts: all
+    gather_facts: False
+    tasks:
+      - name: debug loops
+        debug: msg="name ---> {{ item }}"
+        with_items:
+          - one
+          - two
+```
+]
+
+---
+
+.sidebar[
+### Playbook
+
+* 基本语法
+* 变量与引用
+* 循环
+]
+
+.content[
+#### 嵌套 loops
+
+实现笛卡尔积
+
+```yaml
+---
+  - hosts: all
+    gather_facts: False
+    tasks:
+      - name: debug loops
+        debug: msg="name ---> {{ item[0] }}  value ---> {{ item[1] }}"
+        with_nested:
+          - ['A']
+          - ['a', 'b', 'c']
+```
+]
+
+---
+
+.sidebar[
+### Playbook
+
+* 基本语法
+* 变量与引用
+* 循环
+]
+
+.content[
+#### 散列 loops
+
+```yaml
+---
+  - hosts: all
+    gather_facts: False
+    vars:
+      user:
+        walle:
+          name: walle
+          job: Garbage Collection
+        eva:
+          name: eva
+          job: Health Management
+    tasks:
+      - name: debug loops
+        debug: msg="item: {{ item.key }} ; name: {{ item.value.name }} ; job: {{ item.value.job }}"
+        with_dict: user
+```
+
+]
+
+---
+
+.sidebar[
+### Playbook
+
+* 基本语法
+* 变量与引用
+* 循环
+]
+
+.content[
+#### 文件匹配 loops
+
+通过 `with_fileglob` 循环匹配需要处理的文件：
+
+```yaml
+---
+  - hosts: all
+    gather_facts: False
+    tasks:
+      - name: debug loops
+        debug: msg="files ---> {{ item }}"
+        with_fileglob:
+          - /root/*.yaml
+```
+
+]
+
+---
+
+.sidebar[
+### Playbook
+
+* 基本语法
+* 变量与引用
+* 循环
+]
+
+.content[
+#### 随机选取 loops
+
+```yaml
+---
+  - hosts: all
+    gather_facts: False
+    tasks:
+      - name: debug loops
+        debug: msg="name ---> {{ item }}"
+        with_random_choice:
+          - "ansible 1"
+          - "ansible 2"
+          - "ansible 3"
+```
+
+]
+
+---
+
+.sidebar[
+### Playbook
+
+* 基本语法
+* 变量与引用
+* 循环
+]
+
+.content[
+#### 条件判断 loops
+
+有时需要循环检测，直到 task 的结果达到预想的状态才退出任务执行：
+
+```yaml
+---
+  - hosts: all
+    gather_facts: False
+    tasks:
+      - name: debug loops
+        shell: cat /root/Ansible
+        register: host
+        until: host.stdout.startsWith("Master")
+        retries: 5
+        delay: 5
+```
+
+]
+
+---
+
+.sidebar[
+### Playbook
+
+* 基本语法
+* 变量与引用
+* 循环
+]
+
+.content[
+#### 文件优先匹配 loops
+
+文件优先匹配会根据传入的变量或文件从上往下匹配，将第一个匹配到的文件，作为 `{{item}}` 的值：
+
+```yaml
+---
+  - hosts: all
+    gather_facts: True
+    tasks:
+      - name: debug loops
+        debug: msg="files ---> {{ item }}"
+        with_first_found:
+          - "{{ ansible_distribution }}.yaml"
+          - "default.yaml"
+```
+]
+
+---
+
+.sidebar[
+### Playbook
+
+* 基本语法
+* 变量与引用
+* 循环
+]
+
+.content[
+#### register loops
+
+一般 register 用在单一的 task 中进行变量临时存储，但它还可以同时接受多个 task 的结果：
+
+```yaml
+---
+  - hosts: all
+    gather_facts: True
+    tasks:
+      - name: debug loops
+        shell: "{{ item }}"
+        with_items:
+          - hostname
+          - uname
+        register: ret
+      - name: display loops
+        debug: msg=""{% for i in ret.results %} {{ i.stdout }} {% endfor %}"
+```
+
+]
+
+---
+
+.sidebar[
+### Playbook
+
+* 基本语法
+* 变量与引用
+* 循环
+* lookups
+]
+
+.content[
+Ansible 支持从外部数据拉取信息，这就是 lookups 插件
+]
+
+---
+
+.sidebar[
+### Playbook
+
+* 基本语法
+* 变量与引用
+* 循环
+* lookups
+]
+
+.content[
+#### lookups file
+
+```yaml
+---
+  - hosts: all
+    gather_facts: False
+    vars:
+      contents: "{{ lookup('file', '/etc/sysconfig/network') }}"
+    tasks:
+      - name: debug lookups
+        debug: msg="The contents is {% for i in contents.split('\n') %} {{ i }} {% endfor %}"
+```
+
+]
+
+---
+
+.sidebar[
+### Playbook
+
+* 基本语法
+* 变量与引用
+* 循环
+* lookups
+]
+
+.content[
+#### lookups password
+
+它会对传入的内容进行加密处理：
+
+```yaml
+---
+  - hosts: all
+    gather_facts: False
+    vars:
+      contents: "{{ lookup('password', 'ansible_book') }}"
+    tasks:
+      - name: debug lookups
+        debug: msg="The contents is {{ contents }}"
+```
+
+]
+
+---
+
+.sidebar[
+### Playbook
+
+* 基本语法
+* 变量与引用
+* 循环
+* lookups
+]
+
+.content[
+#### lookups pipe
+
+在被管机器上调用 `subprocess.Popen` 执行命令，并将命令结果传递给变量：
+
+```yaml
+---
+  - hosts: all
+    gather_facts: False
+    vars:
+      contents: "{{ lookup('pipe', 'date +%Y-%m-%d') }}"
+    tasks:
+      - name: debug lookups
+        debug: msg="The contents is {% for i in contents.split('\n') %} {{ i }} {% endfor %}"
+```
+
+]
+
+---
+
+.sidebar[
+### Playbook
+
+* 基本语法
+* 变量与引用
+* 循环
+* lookups
+]
+
+.content[
+#### lookups redis_kv
+
+`redis_kv` 从 Redis 数据库中 `get` 数据，然后给 Ansible 设置值。需要中控机连接 Redis ，因此需要安装 Redis Python 库。
+
+```yaml
+---
+  - hosts: all
+    gather_facts: False
+    vars:
+      contents: "{{ lookup('redis_kv', 'redis://localhost:6379,ansible') }}"
+    tasks:
+      - name: debug lookups
+        debug: msg="The contents is {% for i in contents.split('\n') %} {{ i }} {% endfor %}"
+```
+
+]
+
+---
+
+.sidebar[
+### Playbook
+
+* 基本语法
+* 变量与引用
+* 循环
+* lookups
+]
+
+.content[
+#### lookups template
+
+`template` 类似与 `file`，但它会将模版文件渲染后再读取:
+
+```yaml
+---
+  - hosts: all
+    gather_facts: False
+    vars:
+      contents: "{{ lookup('template', './lookups.j2') }}"
+    tasks:
+      - name: debug lookups
+        debug: msg="The contents is {% for i in contents.split('\n') %} {{ i }} {% endfor %}"
+```
+
+]
+
+---
+
+.sidebar[
+### Playbook
+
+* 基本语法
+* 变量与引用
+* 循环
+* lookups
+* conditionals
+]
+
+.content[
+目前 Ansible 所有 conditionals 方式都是使用 `when` 进行判断，条件成立时执行某个 task ，否则跳过这个 task 。
+
+这个条件就是 Python 里的 True 和 False ， 也支持多个条件的 `and` 或 `or` 。
+
+```yaml
+---
+  - hosts: all
+    tasks:
+      - name: host 192.168.70.186 run this task
+        debug: msg="{{ ansible_default_ipv4.address }}"
+        when: ansible_default_ipv4.address = "192.168.70.186"
+      - name: memtotal < 500M and processor_cores == 2 run this task
+        debug: msg="{{ ansible_fqdn }}"
+        when: ansible_memtotal_mb < 500 and ansible_processor_cores == 2
+      - name: all host run this task
+        shell: hostname
+        register: info
+      - name: hostname is python machine run this task
+        debug: msg="{{ ansible_fqdn }}"
+        when: info['stdout'] == "python"
+      - name: hostname startsWith M run this task
+        debug: msg="{{ ansible_fqdn }}"
+        when: info['stdout'].startWith('M')
+``` 
+]
+
+---
+
+.sidebar[
+### Playbook
+
+* 基本语法
+* 变量与引用
+* 循环
+* lookups
+* conditionals
+* Jinja2 filter
+]
+
+.content[
+Jinja2 是 Ansible 默认的模版语言，Ansible 支持 Jinja2 语言的内置 filter ：
+]
+
+---
+
+.sidebar[
+### Playbook
+
+* 基本语法
+* 变量与引用
+* 循环
+* lookups
+* conditionals
+* Jinja2 filter
+* 内置变量
+]
+
+.content[
+playbook 有很多内置变量，可以方便地实现主机相关的逻辑判断：
+
+* `groups` 会打印出 inventory 文件里面所有的主机以及主机组信息和
+* `group_names` 会打印当前主机所在的 groups 名称，如果没有定义会返回 `ungrouped`
+* `hostvars` 用来调用指定主机的变量，需要传入主机信息
+* `inventory_hostname` 返回 inventory 文件里面定义的主机名
+* `inventory_hostname_short` 返回 inventory 文件中主机名的第一部分
+* `play_hosts` 用来返回当前 playbook 运行的主机信息
+* `inventory_dir` 返回当前 playbook 使用的 inventory 目录
+
 ]
 ---
 
