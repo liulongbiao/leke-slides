@@ -42,10 +42,10 @@
 
 .theme-inverse {
   background: #272822;
-  color: #777872;
+  color: #BBB;
   text-shadow: 0 0 20px #333;
 }
-.theme-inverse h1, .theme-inverse h2 {
+.theme-inverse h1, .theme-inverse h2, .theme-inverse h3 {
   color: #f3f3f3;
   line-height: 0.8em;
 }
