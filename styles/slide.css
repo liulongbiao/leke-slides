@@ -52,7 +52,12 @@
 .theme-inverse .sidebar li:last-child{
   color: #DDD;
 }
-.theme-inverse  .remark-code-line-highlighted{
+.theme-inverse .remark-code-line-highlighted{
   background-color: #673AB7;
   color: #FFF;
+}
+.theme-inverse blockquote {
+  border-left: 2px solid white;
+  margin: 0;
+  padding: 0.1em 1em;
 }
